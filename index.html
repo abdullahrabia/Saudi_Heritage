@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>جغرافية الآثار والتراث السعودي</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+html,body{height:100%}
+body{margin:0;display:flex;flex-direction:column;font-family:Tahoma,Arial,sans-serif;background:#f6f3ec;color:#26352d}
+header{padding:14px 18px;background:#263f35;color:#fff}
+header h1{margin:0 0 6px;font-size:21px}
+header p{margin:0;font-size:13px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:#fff;align-items:center}
+input,select,button{padding:10px;border:1px solid #c7cfc7;border-radius:8px;font:inherit;cursor:pointer;background:#fff}
+button.active{background:#263f35;color:#fff;border-color:#263f35}
+.types{display:flex;gap:5px;margin-right:auto;flex-wrap:wrap}
+.types button{font-size:12px;padding:8px 12px}
+.search-wrap{position:relative;flex:1;min-width:180px}
+.search-wrap input{width:100%;box-sizing:border-box;cursor:text}
+.sug{position:absolute;top:100%;right:0;left:0;z-index:1000;background:#fff;border:1px solid #c7cfc7;border-radius:8px;max-height:260px;overflow-y:auto;display:none;box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.sug div{padding:8px 12px;cursor:pointer;font-size:14px;border-bottom:1px solid #f0f0f0}
+.sug div:hover,.sug div.on{background:#eef3ef}
+.sug small{color:#7b4d22;float:left}
+#map{flex:1;min-height:420px}
+.info{padding:8px 12px;font-size:13px;background:#fff;border-top:1px solid #ddd}
+.leaflet-popup-content{line-height:1.8;text-align:right}
+.hi{font-size:24px;text-align:center;line-height:24px}
+.ph{width:100%;height:160px;margin-top:6px;border-radius:8px;background:#e7e0cf;color:#8a7a55;display:flex;align-items:center;justify-content:center;font-size:12px;text-align:center;overflow:hidden}
+.ph img{width:100%;height:100%;object-fit:cover}
+.lk{display:inline-block;margin:6px 0 0 4px;padding:5px 10px;background:#263f35;color:#fff!important;border-radius:6px;text-decoration:none;font-size:12px}
+.lk.alt{background:#7b4d22}
+</style>
+</head>
+<body>
+<header>
+  <h1>جغرافية الآثار والتراث السعودي</h1>
+  <p>خريطة المحافظات السعودية — استكشف العلاقة بين المكان والتاريخ ومواقع التراث</p>
+</header>
+<div class="toolbar">
+  <div class="search-wrap">
+    <input id="search" type="search" placeholder="ابحث عن محافظة (مثال: بيشة، القطيف، أبها، الرياض)" autocomplete="off">
+    <div id="sug" class="sug"></div>
+  </div>
+  <select id="region"><option value="">كل المناطق الإدارية</option></select>
+  <button id="reset">عرض المملكة كاملة</button>
+  <button id="tg" class="active">🏛️ مواقع التراث</button>
+  <div class="types">
+    <button data-t="roadmap" class="active">🗺️ Roadmap</button>
+    <button data-t="satellite">🛰️ Satellite</button>
+    <button data-t="hybrid">🌍 Hybrid</button>
+    <button data-t="terrain">⛰️ Terrain</button>
+    <button id="sv">🚶 Street View</button>
+  </div>
+</div>
+<div id="map"></div>
+<div class="info" id="stat">جارٍ تحميل حدود المحافظات...</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const stat = $('stat'), search = $('search'), sug = $('sug'), regionSel = $('region');
+const map = L.map('map', { preferCanvas: true }).setView([23.8, 45.0], 5);
+
+// ========== 1. أنواع الخرائط ==========
+const E = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+const T = (p, nz) => L.tileLayer(E + p + '/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, maxNativeZoom: nz || 19, attribution: '&copy; Esri' });
+const base = {
+  roadmap: T('World_Street_Map'),
+  satellite: T('World_Imagery'),
+  hybrid: L.layerGroup([T('World_Imagery'), T('Reference/World_Boundaries_and_Places')]),
+  terrain: L.layerGroup([T('World_Terrain_Base', 13), T('Reference/World_Reference_Overlay', 13)])
+};
+let curBase = base.roadmap.addTo(map);
+document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
+  map.removeLayer(curBase); curBase = base[b.dataset.t].addTo(map);
+  document.querySelectorAll('[data-t]').forEach(x => x.classList.toggle('active', x === b));
+  stat.textContent = b.textContent;
+});
+// Street View الحقيقي يتطلب خرائط Google، لذلك يُفتح في تبويب جديد عند مركز الخريطة الحالي
+$('sv').onclick = () => {
+  const c = map.getCenter();
+  window.open(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${c.lat},${c.lng}`, '_blank', 'noopener');
+};
+
+// ========== 2. المواقع التراثية ==========
+// [الاسم, خط العرض, خط الطول, الوصف, كلمة البحث عن الصور (اختياري)]
+// لإضافة موقع جديد: أضف سطراً هنا فقط، والصورة والروابط تُبنى تلقائياً.
+const SITES = [
+ ["مدائن صالح (الحجر)",26.80,37.95,"أول موقع سعودي في قائمة اليونسكو؛ مقابر نبطية منحوتة في الصخر.","الحجر مدائن صالح"],
+ ["حي الطريف بالدرعية",24.734,46.575,"مهد الدولة السعودية الأولى وموقع تراث عالمي.","حي الطريف"],
+ ["جبة (حائل)",28.02,40.93,"نقوش صخرية عمرها آلاف السنين، موقع تراث عالمي.","جبة حائل"],
+ ["قرية الفاو",19.78,45.15,"عاصمة مملكة كندة، موقع تراث عالمي على أطراف الربع الخالي.","قرية الفاو"],
+ ["جدة التاريخية (البلد)",21.486,39.187,"حي قديم بمبانٍ مرجانية ورواشين خشبية، موقع تراث عالمي.","جدة التاريخية"],
+ ["العلا — البلدة القديمة",26.617,37.917,"ممرات ضيقة وبيوت طينية على طريق القوافل القديم.","البلدة القديمة العلا"],
+ ["واحة تيماء",27.63,38.55,"من أقدم مستوطنات شمال الجزيرة؛ سور أثري وقصر الحمراء.","تيماء"],
+ ["واحة خيبر",25.70,39.29,"حصون وقلاع وبيوت قديمة في واحة بركانية.","خيبر"],
+ ["قلعة تبوك",28.384,36.555,"قلعة عثمانية على طريق الحج الشامي.","قلعة تبوك"],
+ ["قلعة مارد (دومة الجندل)",29.81,39.87,"حصن قديم يعود لآلاف السنين.","قلعة مارد"],
+ ["قلعة زعبل (سكاكا)",29.96,40.21,"قلعة قديمة على تل صخري وسط سكاكا.","قلعة زعبل"],
+ ["قلعة أعيرف (حائل)",27.52,41.70,"قلعة تاريخية على جبل في مدينة حائل.","قلعة أعيرف"],
+ ["قصر المصمك",24.631,46.713,"حصن في الرياض، منه انطلق فتح الرياض عام 1902م.","قصر المصمك"],
+ ["قرية الغاط التراثية",26.03,44.97,"بيوت طينية قديمة في منطقة الرياض.","الغاط"],
+ ["الشماسية (القصيم)",26.283,43.933,"بلدة تراثية بيوتها من الطين ومزارع نخيل.","الشماسية"],
+ ["بيت البسام (عنيزة)",26.085,43.995,"بيت تراثي من الطين في عنيزة.","بيت البسام"],
+ ["قصر شبرا (الطائف)",21.274,40.416,"من أشهر المعالم التاريخية في الطائف.","قصر شبرا"],
+ ["سوق القيصرية (الأحساء)",25.379,49.590,"سوق تراثي في الهفوف من أقدم أسواق المنطقة الشرقية.","سوق القيصرية"],
+ ["جبل القارة",25.39,49.70,"كهوف طبيعية وتشكيلات صخرية فريدة في الأحساء.","جبل القارة"],
+ ["ميناء العقير",25.65,50.21,"ميناء تاريخي على ساحل الخليج.","العقير"],
+ ["قلعة تاروت (القطيف)",26.574,50.047,"قلعة قديمة في جزيرة تاروت، من أقدم مواقع الاستيطان.","قلعة تاروت"],
+ ["مسجد القطيف التاريخي",26.519,50.011,"تراث إسلامي في القطيف، من أقدم المساجد في المنطقة.","مسجد القطيف"],
+ ["قرية ذي عين",19.77,41.43,"قرية حجرية فوق جبل ومدرجات زراعية.","قرية ذي عين"],
+ ["رجال ألمع",18.20,42.23,"قرية تراثية بمبانٍ حجرية متعددة الطوابق.","رجال ألمع"],
+ ["قلعة شمسان (أبها)",18.218,42.512,"حصن تاريخي يطل على مدينة أبها.","قلعة شمسان"],
+ ["الأخدود (نجران)",17.53,44.22,"موقع أثري قديم في نجران.","الأخدود نجران"],
+ ["بيت الرفاعي (فرسان)",16.70,42.04,"بيت مرجاني قديم في جزيرة فرسان.","بيت الرفاعي فرسان"]
+];
+
+// روابط البحث عن الصور (تعمل دائماً حتى لو لم تتوفر صورة جاهزة)
+const gi = q => 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q + ' السعودية');
+const cm = q => 'https://commons.wikimedia.org/w/index.php?title=Special:MediaSearch&type=image&search=' + encodeURIComponent(q);
+const wk = q => 'https://ar.wikipedia.org/w/index.php?search=' + encodeURIComponent(q);
+const links = q => `<a class="lk" href="${gi(q)}" target="_blank" rel="noopener">🖼️ صور في Google</a><a class="lk alt" href="${cm(q)}" target="_blank" rel="noopener">📚 ويكيميديا كومنز</a><a class="lk alt" href="${wk(q)}" target="_blank" rel="noopener">ويكيبيديا</a>`;
+
+// صورة الموقع تُجلب مباشرة من ويكيبيديا العربية (تحتاج اتصال بالإنترنت)
+const imgCache = {};
+async function wikiImg(q) {
+  if (q in imgCache) return imgCache[q];
+  try {
+    const u = 'https://ar.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrlimit=4&prop=pageimages&piprop=thumbnail&pithumbsize=520&gsrsearch=' + encodeURIComponent(q);
+    const j = await (await fetch(u)).json();
+    const hit = Object.values((j.query && j.query.pages) || {}).sort((a, b) => a.index - b.index).find(p => p.thumbnail);
+    return imgCache[q] = hit ? hit.thumbnail.source : null;
+  } catch (e) { return undefined; }
+}
+
+const heritageIcon = L.divIcon({ className: 'hi', html: '🏛️', iconSize: [24, 24], iconAnchor: [12, 24] });
+const heritageLayer = L.layerGroup().addTo(map);
+
+SITES.forEach(s => {
+  const q = s[4] || s[0];
+  const html = `<div style="max-width:280px"><strong style="color:#7b4d22;font-size:15px">🏛️ ${s[0]}</strong>
+    <div style="font-size:12px;color:#555">${s[3]}</div>
+    <div class="ph">جارٍ تحميل الصورة…</div>${links(q)}
+    <div style="font-size:11px;color:#888;margin-top:6px">📍 ${s[1].toFixed(4)}, ${s[2].toFixed(4)} (إحداثيات تقريبية)</div></div>`;
+  const m = L.marker([s[1], s[2]], { icon: heritageIcon }).bindPopup(html, { maxWidth: 320, minWidth: 240 }).bindTooltip(s[0], { direction: 'top', offset: [0, -10] });
+  m.on('popupopen', async e => {
+    const box = e.popup.getElement().querySelector('.ph');
+    const src = await wikiImg(q);
+    if (!box) return;
+    if (src) {
+      const im = new Image(); im.alt = s[0];
+      im.onload = () => { box.textContent = ''; box.appendChild(im); };
+      im.onerror = () => box.textContent = 'تعذّر تحميل الصورة — استخدم الروابط أدناه';
+      im.src = src;
+    } else {
+      box.textContent = src === undefined ? 'تعذّر الاتصال بالإنترنت — استخدم الروابط أدناه' : 'لا توجد صورة جاهزة — استخدم الروابط أدناه';
+    }
+  });
+  m.addTo(heritageLayer);
+});
+$('tg').onclick = function () {
+  const on = map.hasLayer(heritageLayer);
+  on ? map.removeLayer(heritageLayer) : heritageLayer.addTo(map);
+  this.classList.toggle('active', !on);
+};
+
+// ========== 3. المدن → المناطق الإدارية ==========
+const REGIONS = {
+ "منطقة الرياض": "الرياض الخرج المجمعة الزلفي وادي_الدواسر الأفلاج الدوادمي شقراء حوطة_بني_تميم المزاحمية ضرما حريملاء الغاط ثادق الدرعية عفيف القويعية الرين السليل ليلى نفي",
+ "منطقة مكة المكرمة": "مكة_المكرمة مكة جدة الطائف القنفذة الليث رابغ خليص الجموم الكامل الخرمة تربة رنية المويه أضم العارضة",
+ "المنطقة الشرقية": "الدمام الخبر الظهران القطيف سيهات صفوى الأحساء الهفوف المبرز حفر_الباطن الجبيل رأس_تنورة بقيق النعيرية قرية_العليا الخفجي العقير",
+ "منطقة المدينة المنورة": "المدينة_المنورة المدينة ينبع العلا بدر خيبر الحناكية المهد",
+ "منطقة القصيم": "بريدة عنيزة الرس البكيرية المذنب البدائع الأسياح النبهانية عيون_الجواء الشماسية رياض_الخبراء",
+ "منطقة عسير": "أبها خميس_مشيط بيشة النماص محايل_عسير ظهران_الجنوب تثليث رجال_ألمع بلقرن بارق تنومة المجاردة سراة_عبيدة الحرجة البرك أحد_رفيدة",
+ "منطقة تبوك": "تبوك ضباء الوجه أملج حقل تيماء",
+ "منطقة حائل": "حائل بقعاء الشنان الغزالة الحائط موقق الشملي سميراء جبة",
+ "منطقة جازان": "جازان أبو_عريش صامطة صبيا بيش الريث الدائر أحد_المسارحة الطوال ضمد الحرث فيفا فرسان",
+ "منطقة نجران": "نجران شرورة حبونا بدر_الجنوب يدمة ثار",
+ "منطقة الباحة": "الباحة بلجرشي المندق المخواة قلوة القرى بني_حسن غامد_الزناد ذي_عين",
+ "منطقة الجوف": "سكاكا القريات دومة_الجندل طبرجل",
+ "منطقة الحدود الشمالية": "عرعر رفحاء طريف العويقيلة"
+};
+const cityToRegion = {};
+Object.entries(REGIONS).forEach(([r, list]) => list.split(' ').forEach(c => cityToRegion[c.replace(/_/g, ' ')] = r));
+
+// [خط العرض, خط الطول, التقريب]
+const RC = {
+ "منطقة الرياض":[24.7,46.7,8],"منطقة مكة المكرمة":[21.4,39.8,8],"المنطقة الشرقية":[22.5,50.0,7],
+ "منطقة المدينة المنورة":[24.5,39.6,8],"منطقة القصيم":[26.3,43.9,8],"منطقة عسير":[18.2,42.5,8],
+ "منطقة تبوك":[28.4,36.6,8],"منطقة حائل":[27.5,41.7,8],"منطقة جازان":[16.9,42.6,8],
+ "منطقة نجران":[17.5,44.2,8],"منطقة الباحة":[20.0,41.5,9],"منطقة الجوف":[29.8,39.9,8],
+ "منطقة الحدود الشمالية":[30.0,42.0,8]
+};
+const CC = {};
+("القطيف:26.519,50.011,11|الدمام:26.436,50.103,11|الخبر:26.279,50.208,11|الأحساء:25.383,49.587,10|الهفوف:25.364,49.588,11|الجبيل:27.004,49.658,11|حفر الباطن:28.434,45.963,10|الرياض:24.713,46.675,11|الخرج:24.148,47.305,11|الدرعية:24.733,46.575,12|وادي الدواسر:20.466,44.800,10|جدة:21.485,39.192,11|مكة المكرمة:21.389,39.857,11|الطائف:21.270,40.416,11|المدينة المنورة:24.470,39.612,11|ينبع:24.089,38.061,11|العلا:26.608,37.923,11|خيبر:25.70,39.29,11|بريدة:26.326,43.976,11|عنيزة:26.084,43.994,11|أبها:18.216,42.505,12|خميس مشيط:18.300,42.733,11|بيشة:19.984,42.605,11|النماص:19.116,42.133,12|تبوك:28.383,36.567,11|تيماء:27.63,38.55,11|حائل:27.511,41.720,11|جبة:28.02,40.93,11|جازان:16.889,42.551,11|أبو عريش:16.969,42.833,11|فرسان:16.70,42.04,11|نجران:17.492,44.128,11|الباحة:20.013,41.467,12|بلجرشي:19.998,41.567,12|سكاكا:29.970,40.200,11|دومة الجندل:29.81,39.87,11|القريات:31.332,37.343,11|عرعر:30.975,41.038,11|رفحاء:29.626,43.495,11")
+  .split('|').forEach(s => { const [n, v] = s.split(':'); CC[n] = v.split(',').map(Number); });
+
+// ========== 4. تطبيع عربي ==========
+function norm(t) {
+  return (t || '').toString()
+    .replace(/[\u064B-\u0652\u0670\u0640]/g, '')
+    .replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
+    .replace(/\s+/g, ' ').trim().toLowerCase();
+}
+const rk = t => norm(t).replace(/^(المنطقه|منطقه) /, '');
+
+// ========== 5. الحدود (GeoJSON) ==========
+// ضع هنا مسار ملف GeoJSON للمحافظات أو رابطه. الخصائص المطلوبة: governorate_ar, governorate_en, region_ar, region_en
+const GEO_URLS = ['saudi_governorates.geojson', 'governorates.geojson'];
+let boundaries = null, govLayers = [], index = [];
+
+regionSel.innerHTML = '<option value="">كل المناطق الإدارية</option>' +
+  Object.keys(RC).map(n => `<option value="${n}">${n}</option>`).join('');
+
+function styleFeature(f) {
+  const sel = regionSel.value;
+  const vis = !sel || rk(f.properties.region_ar) === rk(sel);
+  return { color: '#486b58', weight: 1, opacity: .9, fillColor: '#c7b78c', fillOpacity: vis ? .22 : .04 };
+}
+function govPopup(p) {
+  const n = p.governorate_ar || p.region_ar || '';
+  return `<strong>${n}</strong><br>المنطقة الإدارية: <b>${p.region_ar || ''}</b>` +
+    (p.governorate_en ? `<br>${p.governorate_en}` : '') +
+    `<br><span style="color:#7b4d22;font-weight:bold">🏛️ صور آثار وتراث ${n}:</span><br>${links('آثار وتراث ' + n)}`;
+}
+
+async function init() {
+  let data = null;
+  for (const u of GEO_URLS) {
+    try { const r = await fetch(u); if (r.ok) { data = await r.json(); break; } } catch (e) {}
+  }
+  if (data && data.features && data.features.length) {
+    boundaries = L.geoJSON(data, {
+      style: styleFeature,
+      onEachFeature: (f, layer) => {
+        const p = f.properties;
+        layer.bindPopup(govPopup(p));
+        layer._g = norm(p.governorate_ar);
+        govLayers.push(layer);
+        layer.on('click', () => stat.textContent = 'المنطقة: ' + (p.region_ar || p.region_en || ''));
+      }
+    }).addTo(map);
+    if (boundaries.getBounds().isValid()) map.fitBounds(boundaries.getBounds(), { padding: [10, 10] });
+    stat.textContent = `تم تحميل ${data.features.length} وحدة إدارية. اكتب اسم مدينة أو منطقة في البحث.`;
+  } else {
+    // بدون ملف الحدود: دوائر تقريبية للمناطق حتى يبقى كل شيء قابلاً للاستخدام
+    Object.entries(RC).forEach(([n, c]) =>
+      L.circle([c[0], c[1]], { radius: 140000, color: '#486b58', weight: 1, fillColor: '#c7b78c', fillOpacity: .2 })
+        .bindPopup(govPopup({ region_ar: n })).addTo(map));
+    stat.textContent = 'تعذّر تحميل ملف حدود المحافظات (راجع GEO_URLS في الكود). البحث والمواقع التراثية تعمل.';
+  }
+  buildIndex(data ? data.features : []);
+}
+
+function buildIndex(features) {
+  const seen = new Set(); index = [];
+  const add = (display, region, type) => {
+    const key = norm(display), id = key + '|' + region;
+    if (!key || seen.has(id)) return; seen.add(id);
+    index.push({ key, display, region, type });
+  };
+  Object.entries(cityToRegion).forEach(([c, r]) => add(c, r, 'city'));
+  Object.keys(RC).forEach(r => add(r, r, 'region'));
+  features.forEach(f => { const p = f.properties; if (p.governorate_ar && p.region_ar) add(p.governorate_ar, p.region_ar, 'gov'); });
+  SITES.forEach(s => add(s[0], '🏛️ موقع تراثي', 'site'));
+}
+
+// ========== 6. البحث والاقتراحات ==========
+let items = [], sel = -1;
+
+function setRegion(name) {
+  regionSel.value = [...regionSel.options].some(o => o.value === name) ? name : '';
+  if (boundaries) boundaries.setStyle(styleFeature);
+}
+function go(it) {
+  search.value = it.display; sug.style.display = 'none';
+  if (it.type === 'site') {
+    const s = SITES.find(x => x[0] === it.display);
+    if (!map.hasLayer(heritageLayer)) $('tg').click();
+    map.flyTo([s[1], s[2]], 12);
+    heritageLayer.eachLayer(m => { const l = m.getLatLng(); if (l.lat === s[1] && l.lng === s[2]) setTimeout(() => m.openPopup(), 900); });
+    stat.textContent = it.display; return;
+  }
+  setRegion(it.region);
+  const gl = govLayers.find(l => l._g === it.key);
+  const cc = CC[it.display], rc = RC[it.region];
+  if (gl) { map.fitBounds(gl.getBounds(), { maxZoom: 11 }); gl.openPopup(); }
+  else if (cc) map.flyTo([cc[0], cc[1]], cc[2]);
+  else if (rc) map.flyTo([rc[0], rc[1]], rc[2]);
+  stat.textContent = `${it.display} — ${it.region}`;
+}
+function showSug() {
+  const q = norm(search.value);
+  if (!q) { sug.style.display = 'none'; return; }
+  items = index.filter(i => i.key.includes(q))
+    .sort((a, b) => (b.key.startsWith(q) - a.key.startsWith(q)) || a.key.length - b.key.length).slice(0, 10);
+  sel = -1; sug.innerHTML = '';
+  items.forEach(i => {
+    const d = document.createElement('div');
+    d.innerHTML = `${i.display}<small>${i.region}</small>`;
+    d.onmousedown = e => { e.preventDefault(); go(i); };
+    sug.appendChild(d);
+  });
+  if (!items.length) sug.innerHTML = '<div>لا توجد نتائج</div>';
+  sug.style.display = 'block';
+}
+search.addEventListener('input', showSug);
+search.addEventListener('focus', showSug);
+search.addEventListener('blur', () => setTimeout(() => sug.style.display = 'none', 150));
+search.addEventListener('keydown', e => {
+  const rows = sug.children;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % (items.length || 1);
+    [...rows].forEach((r, i) => r.classList.toggle('on', i === sel));
+  } else if (e.key === 'Enter' && items.length) go(items[sel < 0 ? 0 : sel]);
+  else if (e.key === 'Escape') sug.style.display = 'none';
+});
+
+regionSel.addEventListener('change', () => {
+  const n = regionSel.value;
+  if (boundaries) boundaries.setStyle(styleFeature);
+  if (n && RC[n]) { map.flyTo([RC[n][0], RC[n][1]], RC[n][2]); stat.textContent = n; }
+  else $('reset').click();
+});
+$('reset').onclick = () => {
+  search.value = ''; regionSel.value = ''; sug.style.display = 'none'; map.closePopup();
+  if (boundaries) { boundaries.setStyle(styleFeature); map.fitBounds(boundaries.getBounds(), { padding: [10, 10] }); }
+  else map.setView([23.8, 45.0], 5);
+  stat.textContent = 'عرض المملكة كاملة';
+};
+
+init();
+</script>
+</body>
+</html>
